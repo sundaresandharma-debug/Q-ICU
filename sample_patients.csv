@@ -1,0 +1,13 @@
+patient_id,age,severity,spo2,heart_rate,respiratory_rate,blood_pressure,current_state
+P001,67,92,84,126,31,84,Waiting
+P002,54,76,89,112,27,96,Ventilator
+P003,71,64,93,102,23,108,Bed + Nurse
+P004,43,48,95,94,20,116,Stable
+P005,59,87,86,118,29,91,Waiting
+P006,32,37,97,88,18,121,Stable
+P007,78,69,91,109,25,99,Bed + Nurse
+P008,61,58,94,97,21,111,Waiting
+P009,49,81,88,115,28,93,Waiting
+P010,36,29,98,78,15,124,Stable
+P011,69,73,90,105,26,97,Waiting
+P012,57,52,93,99,22,106,Bed + Nurse
