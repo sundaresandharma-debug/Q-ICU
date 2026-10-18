@@ -1,0 +1,126 @@
+{
+  "recordedOn": "2026-10-18",
+  "resources": {
+    "beds": 8,
+    "ventilators": 4,
+    "nurses": 7
+  },
+  "shots": 256,
+  "bottleneck": "Ventilators",
+  "demand": {
+    "Ventilators": 6,
+    "Beds": 8,
+    "Nurses": 8
+  },
+  "pressures": {
+    "Ventilators": 1.5,
+    "Beds": 1.0,
+    "Nurses": 1.143
+  },
+  "affected": [
+    "P001",
+    "P005",
+    "P009",
+    "P002",
+    "P007",
+    "P003"
+  ],
+  "priorities": {
+    "P001": 93,
+    "P002": 77,
+    "P003": 62,
+    "P004": 42,
+    "P005": 88,
+    "P006": 31,
+    "P007": 69,
+    "P008": 54,
+    "P009": 82,
+    "P010": 23
+  },
+  "qaoa": [
+    {
+      "patient": "P001",
+      "resource": "V1"
+    },
+    {
+      "patient": "P005",
+      "resource": "V2"
+    },
+    {
+      "patient": "P009",
+      "resource": "V3"
+    },
+    {
+      "patient": "P002",
+      "resource": "V4"
+    }
+  ],
+  "classical": [
+    {
+      "patient": "P001",
+      "resource": "V1"
+    },
+    {
+      "patient": "P002",
+      "resource": "V2"
+    },
+    {
+      "patient": "P005",
+      "resource": "V3"
+    },
+    {
+      "patient": "P009",
+      "resource": "V4"
+    }
+  ],
+  "foundOptimum": true,
+  "metrics": {
+    "fullQuboVars": 10,
+    "reducedQuboVars": 6,
+    "fullRuntimeMs": 1.4,
+    "qaoaRuntimeMs": 274.24,
+    "baselineMethod": "exact_enumeration"
+  },
+  "patients": [
+    {
+      "id": "P001",
+      "current": "Waiting"
+    },
+    {
+      "id": "P002",
+      "current": "Ventilator"
+    },
+    {
+      "id": "P003",
+      "current": "Bed + Nurse"
+    },
+    {
+      "id": "P004",
+      "current": "Stable"
+    },
+    {
+      "id": "P005",
+      "current": "Waiting"
+    },
+    {
+      "id": "P006",
+      "current": "Stable"
+    },
+    {
+      "id": "P007",
+      "current": "Bed + Nurse"
+    },
+    {
+      "id": "P008",
+      "current": "Waiting"
+    },
+    {
+      "id": "P009",
+      "current": "Waiting"
+    },
+    {
+      "id": "P010",
+      "current": "Stable"
+    }
+  ]
+}

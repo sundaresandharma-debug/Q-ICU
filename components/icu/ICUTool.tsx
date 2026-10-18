@@ -5,8 +5,9 @@ import { FormAlert } from "@/components/Field";
 import { Skeleton } from "@/components/Skeleton";
 import { AddPatientDialog } from "./AddPatientDialog";
 import { ScenarioPanel } from "./ScenarioPanel";
+import { CapacityFigure } from "./CapacityFigure";
 import {
-  CRITICAL_PRIORITY, DEFAULT_RESOURCES, DEMO_PATIENTS, MAX_PATIENTS, RESOURCE_ORDER, SAMPLE_CSV, allocRow, buildPreview,
+  CRITICAL_PRIORITY, DEFAULT_RESOURCES, DEMO_PATIENTS, MAX_PATIENTS, SAMPLE_CSV, allocRow, buildPreview,
   capacityOf, clamp, effectiveScore, holds, normalizeKey, parseCSV, planAction, slotOf, toPatient, validatePatients,
   type Patient, type PlanAction, type Prediction, type ResourceName, type Resources, type Result,
 } from "./model";
@@ -195,32 +196,7 @@ export function ICUTool({ mode }: { mode: "demo" | "account" }) {
 
           <section aria-labelledby="capacity-title" className="block">
             <h2 id="capacity-title" className="block-title">Demand against capacity</h2>
-            <table className="capacity">
-              <caption className="visually-hidden">Patients predicted to need each resource, compared with units available</caption>
-              <thead className="visually-hidden"><tr><th scope="col">Resource</th><th scope="col">Needed</th><th scope="col">Available</th><th scope="col">Ratio</th></tr></thead>
-              <tbody>
-                {RESOURCE_ORDER.map(name => {
-                  const need = result.demand[name] ?? 0, cap = capacity[name];
-                  const scale = Math.max(cap, ...RESOURCE_ORDER.map(n => result.demand[n] ?? 0), 1);
-                  const over = need > cap;
-                  return (
-                    <tr key={name} data-bottleneck={name === r && hasPatients}>
-                      <th scope="row">{name}{name === r && hasPatients && <span className="tag">bottleneck</span>}</th>
-                      <td className="num">{running ? <Skeleton width={32} /> : need}</td>
-                      <td className="num">of {cap}</td>
-                      <td className="capacity-bar-cell">
-                        <div className="capacity-bar" aria-hidden="true">
-                          <div className="capacity-need" data-over={over} style={{ width: `${(need / scale) * 100}%` }} />
-                          <div className="capacity-line" style={{ left: `${(cap / scale) * 100}%` }} />
-                        </div>
-                      </td>
-                      <td className="num ratio">{(need / Math.max(cap, 1)).toFixed(2)}x</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p className="meta">Bar: patients who need the resource. Vertical rule: units available.</p>
+            <CapacityFigure demand={result.demand} capacity={capacity} bottleneck={hasPatients ? r : null} loading={running} />
           </section>
 
           <section aria-labelledby="plan-title" className="block">

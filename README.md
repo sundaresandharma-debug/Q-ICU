@@ -102,6 +102,8 @@ npm run check                    # design rules, colour contrast, TypeScript
 npm run build
 ```
 
+The landing page figures come from a recorded run of the demo scenario. After changing the engine or demo data, refresh it with `python scripts/record_demo_run.py`.
+
 CI (`.github/workflows/ci.yml`) also runs the database migration and the row level security tests in `supabase/tests/rls.sql` against Postgres 16.
 
 ## Deploying
