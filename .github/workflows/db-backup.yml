@@ -38,7 +38,7 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select public.purge_expired_data();"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: q-icu-db-${{ env.STAMP }}
           path: q-icu-*.dump.gpg
