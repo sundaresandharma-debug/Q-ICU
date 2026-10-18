@@ -64,10 +64,10 @@ export function ScenarioPanel({ patients, resources, onLoad }: { patients: Patie
   }
 
   return (
-    <section className="section" aria-labelledby="saved-title" aria-busy={items === null}>
-      <div className="section-head"><h2 id="saved-title">Saved scenarios</h2><p>Only you can see these.</p></div>
+    <section className="rail-block" aria-labelledby="saved-title" aria-busy={items === null}>
+      <h2 id="saved-title" className="block-title">Saved scenarios</h2><p className="meta">Only you can see these.</p>
       <form className="inline-form" onSubmit={save} noValidate>
-        <Field label="Save the current patients and resources as" name="scenario_name" placeholder="Night shift, ward B" maxLength={SCENARIO_NAME_MAX} value={name} onChange={e => setName(e.target.value)} error={nameError} />
+        <Field label="Save current setup as" name="scenario_name" placeholder="Night shift, ward B" maxLength={SCENARIO_NAME_MAX} value={name} onChange={e => setName(e.target.value)} error={nameError} />
         <button type="submit" className="btn" disabled={saving}>{saving ? "Saving" : "Save scenario"}</button>
       </form>
       <div aria-live="polite" style={{ margin: "12px 0" }}>{status && <FormAlert kind={status.kind}>{status.text}</FormAlert>}</div>

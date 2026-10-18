@@ -34,6 +34,8 @@ export type Result = {
   /** true = numbers came from the Python/Qiskit backend; false = browser preview estimate. */
   measured: boolean;
   bottleneck: ResourceName; bottleneckReason: string; pressure: number;
+  /** Patients predicted to need each resource. */
+  demand: Record<ResourceName, number>;
   affectedIds: string[];
   baseline: Allocation[]; proposed: Allocation[];
   metrics: Metrics;
@@ -70,7 +72,7 @@ export function effectiveScore(p: Patient, pred?: Prediction) {
   return { vent, priority };
 }
 
-const holds = (p: Patient, r: ResourceName) => p.current.toLowerCase().includes(KEYWORD[r]);
+export const holds = (p: Patient, r: ResourceName) => p.current.toLowerCase().includes(KEYWORD[r]);
 
 function needs(p: Patient & { vent: number }, r: ResourceName) {
   if (r === "Ventilators") return p.vent >= VENT_THRESHOLD;
@@ -135,6 +137,7 @@ export function buildPreview(patients: Patient[], res: Resources, preds: Record<
     measured: false,
     bottleneck: r,
     pressure: bn.ratio,
+    demand: Object.fromEntries(ranked.map(x => [x.name, x.demand])) as Record<ResourceName, number>,
     bottleneckReason: patients.length
       ? `${bn.demand} patients are estimated to need ${r.toLowerCase()}, with ${cap} available (${bn.ratio.toFixed(2)} times capacity, browser estimate).`
       : "Add or import patients to see an estimate.",
@@ -236,3 +239,23 @@ export const DEMO_PATIENTS: Patient[] = parseCSV(SAMPLE_CSV).map(toPatient);
 export const DEFAULT_RESOURCES: Resources = { beds: 8, ventilators: 4, nurses: 7 };
 
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+export const RESOURCE_ORDER: ResourceName[] = ["Ventilators", "Beds", "Nurses"];
+export const capacityOf = (res: Resources): Record<ResourceName, number> => ({ Ventilators: res.ventilators, Beds: res.beds, Nurses: res.nurses });
+
+/** The unit of the bottleneck resource a patient gets in an allocation, or null. */
+export function slotOf(rows: Allocation[], id: string, r: ResourceName): string | null {
+  const row = rows.find(x => x.patient === id);
+  if (!row) return null;
+  return r === "Ventilators" ? row.ventilator : r === "Beds" ? row.bed : row.nurse;
+}
+
+export type PlanAction = "Keep" | "Assign" | "Release" | "Wait" | "No change";
+
+/** What the proposed allocation means for one patient, compared with what they hold now. */
+export function planAction(holdsNow: boolean, slot: string | null, inReduced: boolean): PlanAction {
+  if (slot && holdsNow) return "Keep";
+  if (slot) return "Assign";
+  if (holdsNow) return "Release";
+  return inReduced ? "Wait" : "No change";
+}

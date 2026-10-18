@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FormAlert } from "@/components/Field";
-import { SkeletonRows, Skeleton } from "@/components/Skeleton";
+import { Skeleton } from "@/components/Skeleton";
 import { AddPatientDialog } from "./AddPatientDialog";
 import { ScenarioPanel } from "./ScenarioPanel";
 import {
-  DEFAULT_RESOURCES, DEMO_PATIENTS, MAX_PATIENTS, SAMPLE_CSV, allocRow, buildPreview, clamp, effectiveScore,
-  normalizeKey, parseCSV, toPatient, validatePatients,
-  type Allocation, type Patient, type Prediction, type ResourceName, type Resources, type Result,
+  CRITICAL_PRIORITY, DEFAULT_RESOURCES, DEMO_PATIENTS, MAX_PATIENTS, RESOURCE_ORDER, SAMPLE_CSV, allocRow, buildPreview,
+  capacityOf, clamp, effectiveScore, holds, normalizeKey, parseCSV, planAction, slotOf, toPatient, validatePatients,
+  type Patient, type PlanAction, type Prediction, type ResourceName, type Resources, type Result,
 } from "./model";
 
 type Message = { kind: "error" | "info" | "success"; text: string } | null;
@@ -111,6 +111,7 @@ export function ICUTool({ mode }: { mode: "demo" | "account" }) {
         bottleneck: r,
         bottleneckReason: data.bottleneckReason,
         pressure: data.pressures[r],
+        demand: data.demand,
         affectedIds: data.affectedPatients.map((p: Patient) => p.id),
         baseline: data.allocations.fullBaseline.map((x: { patient: string; resource: string }) => allocRow(x.patient, x.resource, r, "Classical baseline")),
         proposed: data.allocations.pbaQaoa.map((x: { patient: string; resource: string }) => allocRow(x.patient, x.resource, r, locked.has(x.patient) ? "Kept (unaffected)" : "QAOA")),
@@ -154,142 +155,187 @@ export function ICUTool({ mode }: { mode: "demo" | "account" }) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  const ms = (v: number | null) => (v === null ? "Not measured" : `${v} ms`);
+  const capacity = capacityOf(resources);
+  const r = result.bottleneck;
+  const short = result.demand[r] > capacity[r];
+  const headline = !hasPatients
+    ? "No patients loaded."
+    : short ? `${r} run out first.` : "No shortage predicted.";
+  const subline = !hasPatients
+    ? "Import a file, add a patient or restore the demo to see a plan."
+    : short
+      ? `${result.demand[r]} patients need ${articleFor(r)}, ${capacity[r]} ${capacity[r] === 1 ? "is" : "are"} available.`
+      : `${r} are the tightest: ${result.demand[r]} needed of ${capacity[r]}.`;
 
   return (
-    <div className="wrap tool">
-      <div className="tool-head">
-        <div>
-          <h1>{mode === "account" ? "Dashboard" : "Q-ICU demo"}</h1>
-          <p>Timestep {timestep}. {source}. <span className={`badge ${result.measured ? "badge-live" : ""}`}>{result.measured ? "Measured result" : "Browser estimate"}</span></p>
-        </div>
-        <div className="btn-row">
-          <button type="button" className="btn" onClick={simulateNextStep} disabled={running || !hasPatients}>Next timestep</button>
-          <button type="button" className="btn btn-primary" onClick={optimize} disabled={running || !hasPatients} aria-disabled={running || !hasPatients}>
-            {running ? "Running optimizer" : "Run optimizer"}
-          </button>
-        </div>
-      </div>
-      <p className="notice">Synthetic data only. Do not enter real patient information. This tool is not for clinical decisions.</p>
+    <div className="wrap chart">
+      <header className="chart-head">
+        <p className="eyebrow">
+          {mode === "account" && <>Dashboard <span aria-hidden="true">/</span> </>}Timestep {timestep} <span aria-hidden="true">/</span> {source}
+        </p>
+        <span className={`badge ${result.measured ? "badge-live" : ""}`}>{result.measured ? "Measured run" : "Browser estimate"}</span>
+      </header>
 
-      <div aria-live="polite" style={{ marginTop: 14 }}>
-        {message && <FormAlert kind={message.kind}>{message.text}</FormAlert>}
-        <p className="visually-hidden" role="status">{running ? "Optimizer running. This can take up to a minute." : ""}</p>
-      </div>
+      <div className="chart-grid">
+        <div className="chart-main">
+          <section aria-labelledby="headline" aria-busy={running} className="verdict">
+            <h1 id="headline">{running ? "Running the optimizer" : headline}</h1>
+            <p className="verdict-sub">{running ? "This can take up to a minute." : subline}</p>
+            <div className="btn-row verdict-actions">
+              <button type="button" className="btn btn-primary" onClick={optimize} disabled={running || !hasPatients} aria-disabled={running || !hasPatients}>
+                {running ? "Running optimizer" : "Run optimizer"}
+              </button>
+              <button type="button" className="btn" onClick={simulateNextStep} disabled={running || !hasPatients}>Advance one timestep</button>
+            </div>
+            <div aria-live="polite" className="verdict-message">
+              {message && <FormAlert kind={message.kind}>{message.text}</FormAlert>}
+              <p className="visually-hidden" role="status">{running ? "Optimizer running. This can take up to a minute." : ""}</p>
+            </div>
+          </section>
 
-      {mode === "account" && <ScenarioPanel patients={patients} resources={resources} onLoad={loadScenario} />}
-
-      <section className="section" aria-labelledby="inputs-title">
-        <div className="section-head">
-          <h2 id="inputs-title">Patients and resources</h2>
-          <p>Required columns: patient_id, age, severity, spo2, heart_rate, respiratory_rate, blood_pressure. Optional: current_state, ventilator_need, priority.</p>
-        </div>
-        <div className="btn-row">
-          <button type="button" className="btn" onClick={() => fileRef.current?.click()}>Import CSV or JSON</button>
-          <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden aria-hidden="true" tabIndex={-1}
-            onChange={e => { const f = e.target.files?.[0]; if (f) importFile(f); e.currentTarget.value = ""; }} />
-          <button ref={addButtonRef} type="button" className="btn" onClick={() => setShowAdd(true)} disabled={patients.length >= MAX_PATIENTS}>Add patient</button>
-          <button type="button" className="btn" onClick={downloadSample}>Download sample CSV</button>
-          <button type="button" className="btn" onClick={resetDemo}>Reset demo</button>
-        </div>
-        <div className="resource-grid">
-          <NumberSetting label="ICU beds" value={resources.beds} onChange={beds => setResources(r => ({ ...r, beds }))} />
-          <NumberSetting label="Ventilators" value={resources.ventilators} onChange={ventilators => setResources(r => ({ ...r, ventilators }))} />
-          <NumberSetting label="Nurses" value={resources.nurses} onChange={nurses => setResources(r => ({ ...r, nurses }))} />
-          <NumberSetting label="QAOA shots" value={shots} min={32} max={4096} onChange={setShots} />
-        </div>
-      </section>
-
-      <section className="section" aria-labelledby="summary-title" aria-busy={running}>
-        <div className="section-head"><h2 id="summary-title">Summary</h2><p>{result.measured ? "From the last optimizer run" : "Browser estimate until you run the optimizer"}</p></div>
-        <dl className="figures">
-          <Figure label="Patients" value={patients.length} note={`Timestep ${timestep}`} />
-          <Figure label="Predicted bottleneck" value={hasPatients ? result.bottleneck : "None"} note={`${Math.round(result.pressure * 100)}% of capacity`} loading={running} />
-          <Figure label="Problem size (reduced / full)" value={`${metrics.reducedQuboVars} / ${metrics.fullQuboVars}`} note="One variable per patient" loading={running} />
-          <Figure label="QAOA runtime" value={ms(metrics.runtimeProposed)} note={metrics.runtimeFull === null ? "Run the optimizer to measure" : `Full classical solve: ${metrics.runtimeFull} ms`} loading={running} />
-        </dl>
-        <div className="pressure">
-          <p style={{ margin: "0 0 6px" }}>{result.bottleneckReason}</p>
-          <div className="meter" aria-hidden="true"><div className="meter-track"><div className="meter-fill" style={{ width: `${clamp(Math.round(result.pressure * 100), 0, 100)}%` }} /></div></div>
-        </div>
-      </section>
-
-      <section className="section" aria-labelledby="method-title">
-        <div className="section-head"><h2 id="method-title">Method</h2><p>Step two decides which patients reach the quantum step.</p></div>
-        <ol className="method">
-          <li><span>01</span><b>Predict</b><p>Score each patient for ventilator need.</p></li>
-          <li aria-current="step"><span>02</span><b>Detect</b><p>Pick the resource with the highest demand to capacity ratio.</p></li>
-          <li><span>03</span><b>Reduce</b><p>Keep only the patients that resource affects.</p></li>
-          <li><span>04</span><b>Optimize</b><p>Run QAOA on the reduced problem.</p></li>
-        </ol>
-        <p className="meta" style={{ marginTop: 12 }}>{result.quantumNote ?? "Capacity is enforced as a penalty term in the QUBO. Run the optimizer for a QAOA result."}</p>
-      </section>
-
-      <section className="section" aria-labelledby="patients-title">
-        <div className="section-head"><h2 id="patients-title">Patients</h2><p>{Object.keys(predictions).length ? "Ventilator risk from the ML model in the last run" : "Ventilator risk is a browser estimate until you run the optimizer"}</p></div>
-        {hasPatients ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <caption>Patients in bold are in the reduced problem sent to QAOA.</caption>
-              <thead><tr><th scope="col">Patient</th><th scope="col">Age</th><th scope="col">Severity</th><th scope="col">SpO2</th><th scope="col">Ventilator risk</th><th scope="col">Priority</th><th scope="col">Current state</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr></thead>
+          <section aria-labelledby="capacity-title" className="block">
+            <h2 id="capacity-title" className="block-title">Demand against capacity</h2>
+            <table className="capacity">
+              <caption className="visually-hidden">Patients predicted to need each resource, compared with units available</caption>
+              <thead className="visually-hidden"><tr><th scope="col">Resource</th><th scope="col">Needed</th><th scope="col">Available</th><th scope="col">Ratio</th></tr></thead>
               <tbody>
-                {patients.map(p => {
-                  const s = effectiveScore(p, predictions[p.id]);
-                  const inReduced = affected.has(p.id);
+                {RESOURCE_ORDER.map(name => {
+                  const need = result.demand[name] ?? 0, cap = capacity[name];
+                  const scale = Math.max(cap, ...RESOURCE_ORDER.map(n => result.demand[n] ?? 0), 1);
+                  const over = need > cap;
                   return (
-                    <tr key={p.id} data-affected={inReduced}>
-                      <th scope="row">{p.id}{inReduced && <span className="tag">reduced</span>}</th>
-                      <td className="num">{p.age}</td>
-                      <td><Meter value={p.severity} /></td>
-                      <td className="num">{p.spo2}%</td>
-                      <td>{running ? <Skeleton width={90} /> : <Meter value={s.vent} suffix="%" />}</td>
-                      <td>{running ? <Skeleton width={90} /> : <Meter value={s.priority} />}</td>
-                      <td>{p.current}</td>
-                      <td><button type="button" className="btn btn-small" onClick={() => removePatient(p.id)} aria-label={`Remove patient ${p.id}`}>Remove</button></td>
+                    <tr key={name} data-bottleneck={name === r && hasPatients}>
+                      <th scope="row">{name}{name === r && hasPatients && <span className="tag">bottleneck</span>}</th>
+                      <td className="num">{running ? <Skeleton width={32} /> : need}</td>
+                      <td className="num">of {cap}</td>
+                      <td className="capacity-bar-cell">
+                        <div className="capacity-bar" aria-hidden="true">
+                          <div className="capacity-need" data-over={over} style={{ width: `${(need / scale) * 100}%` }} />
+                          <div className="capacity-line" style={{ left: `${(cap / scale) * 100}%` }} />
+                        </div>
+                      </td>
+                      <td className="num ratio">{(need / Math.max(cap, 1)).toFixed(2)}x</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        ) : (
-          <div className="empty">
-            <h3>No patients yet</h3>
-            <p>Import a CSV or JSON file, add a patient by hand, or restore the demo scenario.</p>
-            <div className="btn-row">
-              <button type="button" className="btn btn-primary" onClick={resetDemo}>Restore demo scenario</button>
-              <button type="button" className="btn" onClick={() => setShowAdd(true)}>Add patient</button>
-            </div>
-          </div>
-        )}
-      </section>
+            <p className="meta">Bar: patients who need the resource. Vertical rule: units available.</p>
+          </section>
 
-      <section className="section compare" aria-label="Results" aria-busy={running}>
-        <div>
-          <div className="section-head"><h2>Allocation</h2><p>{result.measured ? "Classical full problem against QAOA on the reduced problem" : "Greedy estimate in the browser"}</p></div>
-          <div className="alloc">
-            <AllocationTable title="Classical, full problem" data={result.baseline} loading={running} />
-            <AllocationTable title="QAOA, reduced problem" data={result.proposed} loading={running} />
-          </div>
-        </div>
-        <div>
-          <div className="section-head"><h2>Comparison</h2><p>{result.measured ? "Measured in this run" : "Runtimes need the optimizer"}</p></div>
-          {running ? <SkeletonRows rows={5} /> : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th scope="col">Measure</th><th scope="col">Classical</th><th scope="col">QAOA</th></tr></thead>
-                <tbody>
-                  <MetricRow label={`Critical patients served (of ${metrics.criticalTotal})`} a={metrics.criticalServedFull} b={metrics.criticalServedProposed} />
-                  <MetricRow label="Resource use" a={metrics.utilizationFull} b={metrics.utilizationProposed} suffix="%" />
-                  <MetricRow label="Constraint violations" a={metrics.violationsFull} b={metrics.violationsProposed} />
-                  <MetricRow label="Allocation changes" a={metrics.changesFull} b={metrics.changesProposed} />
-                  <MetricRow label="Runtime" a={metrics.runtimeFull} b={metrics.runtimeProposed} suffix=" ms" />
-                </tbody>
-              </table>
+          <section aria-labelledby="plan-title" className="block">
+            <div className="block-head">
+              <h2 id="plan-title" className="block-title">Plan for {r.toLowerCase()}</h2>
+              <p className="meta">{Object.keys(predictions).length ? "Risk from the ML model in the last run" : "Risk is a browser estimate until you run the optimizer"}</p>
             </div>
-          )}
+            {hasPatients ? (
+              <div className="table-wrap">
+                <table className="data-table plan">
+                  <caption>Rows marked QAOA are in the reduced problem. Priority {CRITICAL_PRIORITY} and above is critical. The classical column shows where the full classical solve disagrees.</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Patient</th><th scope="col">Age</th><th scope="col">SpO2</th><th scope="col">Vent. risk</th>
+                      <th scope="col">Priority</th><th scope="col">Now</th><th scope="col">QAOA plan</th><th scope="col">Classical</th>
+                      <th scope="col"><span className="visually-hidden">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {patients.map(p => {
+                      const sc = effectiveScore(p, predictions[p.id]);
+                      const inReduced = affected.has(p.id);
+                      const slot = slotOf(result.proposed, p.id, r);
+                      const action = planAction(holds(p, r), slot, inReduced);
+                      const classical = planAction(holds(p, r), slotOf(result.baseline, p.id, r), inReduced);
+                      const differs = classical !== action;
+                      const critical = sc.priority >= CRITICAL_PRIORITY;
+                      return (
+                        <tr key={p.id} data-reduced={inReduced}>
+                          <th scope="row">{p.id}{inReduced && <span className="tag">QAOA</span>}</th>
+                          <td className="num">{p.age}</td>
+                          <td className="num">{p.spo2}%</td>
+                          <td>{running ? <Skeleton width={80} /> : <Meter value={sc.vent} />}</td>
+                          <td className="num">{running ? <Skeleton width={28} /> : <>{Math.round(sc.priority)}{critical && <span className="critical">critical</span>}</>}</td>
+                          <td>{p.current}</td>
+                          <td>{running ? <Skeleton width={70} /> : <Action action={action} slot={slot} />}</td>
+                          <td>{running ? <Skeleton width={60} /> : <span className={differs ? "differs" : "same"}>{differs ? classical : "Same"}</span>}</td>
+                          <td><button type="button" className="link-button remove" onClick={() => removePatient(p.id)} aria-label={`Remove patient ${p.id}`}>Remove</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty">
+                <h3>No patients yet</h3>
+                <p>Import a CSV or JSON file, add a patient by hand, or restore the demo scenario.</p>
+                <div className="btn-row">
+                  <button type="button" className="btn btn-primary" onClick={resetDemo}>Restore demo scenario</button>
+                  <button type="button" className="btn" onClick={() => setShowAdd(true)}>Add patient</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <details className="method-notes">
+            <summary>How this plan was made</summary>
+            <ol>
+              <li><b>Predict.</b> A logistic regression model, trained on synthetic records, scores each patient for ventilator need.</li>
+              <li><b>Detect.</b> Demand is divided by capacity for each resource. The highest ratio is the bottleneck.</li>
+              <li><b>Reduce.</b> Only patients who need, hold or are high priority for that resource stay in the problem, up to 12. Everyone else keeps what they have.</li>
+              <li><b>Optimize.</b> QAOA on Qiskit Aer solves the reduced problem. A classical solver handles the full one for comparison.</li>
+            </ol>
+            <p>{result.quantumNote ?? "Capacity is enforced as a penalty term in the QUBO. Run the optimizer for a QAOA result."}</p>
+          </details>
         </div>
-      </section>
+
+        <aside className="chart-rail" aria-label="Controls and results">
+          <section className="rail-block" aria-labelledby="capacity-inputs">
+            <h2 id="capacity-inputs" className="block-title">Capacity</h2>
+            <div className="rail-fields">
+              <NumberSetting label="ICU beds" value={resources.beds} onChange={beds => setResources(x => ({ ...x, beds }))} />
+              <NumberSetting label="Ventilators" value={resources.ventilators} onChange={ventilators => setResources(x => ({ ...x, ventilators }))} />
+              <NumberSetting label="Nurses" value={resources.nurses} onChange={nurses => setResources(x => ({ ...x, nurses }))} />
+              <NumberSetting label="QAOA shots" value={shots} min={32} max={4096} onChange={setShots} />
+            </div>
+          </section>
+
+          <section className="rail-block" aria-labelledby="compare-title" aria-busy={running}>
+            <h2 id="compare-title" className="block-title">Classical against QAOA</h2>
+            <table className="ledger">
+              <thead><tr><th scope="col"><span className="visually-hidden">Measure</span></th><th scope="col">Classical</th><th scope="col">QAOA</th></tr></thead>
+              <tbody>
+                <LedgerRow label="Problem size" a={metrics.fullQuboVars} b={metrics.reducedQuboVars} loading={running} />
+                <LedgerRow label={`Critical served of ${metrics.criticalTotal}`} a={metrics.criticalServedFull} b={metrics.criticalServedProposed} loading={running} />
+                <LedgerRow label="Resource use" a={metrics.utilizationFull} b={metrics.utilizationProposed} suffix="%" loading={running} />
+                <LedgerRow label="Violations" a={metrics.violationsFull} b={metrics.violationsProposed} loading={running} />
+                <LedgerRow label="Changes" a={metrics.changesFull} b={metrics.changesProposed} loading={running} />
+                <LedgerRow label="Runtime (ms)" a={metrics.runtimeFull} b={metrics.runtimeProposed} loading={running} />
+              </tbody>
+            </table>
+            {!result.measured && <p className="meta">Browser estimate. Runtimes appear after you run the optimizer.</p>}
+          </section>
+
+          <section className="rail-block" aria-labelledby="data-title">
+            <h2 id="data-title" className="block-title">Patients</h2>
+            <div className="rail-actions">
+              <button type="button" className="btn btn-wide" onClick={() => fileRef.current?.click()}>Import CSV or JSON</button>
+              <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden aria-hidden="true" tabIndex={-1}
+                onChange={e => { const f = e.target.files?.[0]; if (f) importFile(f); e.currentTarget.value = ""; }} />
+              <button ref={addButtonRef} type="button" className="btn btn-wide" onClick={() => setShowAdd(true)} disabled={patients.length >= MAX_PATIENTS}>Add patient</button>
+              <div className="btn-row">
+                <button type="button" className="link-button" onClick={downloadSample}>Sample CSV</button>
+                <button type="button" className="link-button" onClick={resetDemo}>Reset demo</button>
+              </div>
+            </div>
+            <p className="meta">Columns: patient_id, age, severity, spo2, heart_rate, respiratory_rate, blood_pressure. Optional: current_state, ventilator_need, priority.</p>
+          </section>
+
+          {mode === "account" && <ScenarioPanel patients={patients} resources={resources} onLoad={loadScenario} />}
+
+          <p className="rail-note">Synthetic data only. Not for clinical decisions.</p>
+        </aside>
+      </div>
 
       {showAdd && (
         <AddPatientDialog
@@ -301,6 +347,8 @@ export function ICUTool({ mode }: { mode: "demo" | "account" }) {
     </div>
   );
 }
+
+const articleFor = (r: ResourceName) => (r === "Ventilators" ? "a ventilator" : r === "Beds" ? "a bed" : "a nurse");
 
 /** Number input that lets people type freely and only commits values inside the range. */
 function NumberSetting({ label, value, onChange, min = 1, max = 100 }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number }) {
@@ -325,42 +373,22 @@ function NumberSetting({ label, value, onChange, min = 1, max = 100 }: { label: 
   );
 }
 
-function Figure({ label, value, note, loading = false }: { label: string; value: React.ReactNode; note: string; loading?: boolean }) {
-  return (
-    <div className="figure">
-      <dt>{label}</dt>
-      <dd>{loading ? <Skeleton width="60%" height={28} /> : value}</dd>
-      <p className="figure-note">{note}</p>
-    </div>
-  );
-}
-
-function Meter({ value, suffix = "" }: { value: number; suffix?: string }) {
+function Meter({ value }: { value: number }) {
   const v = clamp(Math.round(value), 0, 100);
-  return <div className="meter"><span>{v}{suffix}</span><div className="meter-track" aria-hidden="true"><div className="meter-fill" style={{ width: `${v}%` }} /></div></div>;
+  return <div className="meter"><span>{v}%</span><div className="meter-track" aria-hidden="true"><div className="meter-fill" style={{ width: `${v}%` }} /></div></div>;
 }
 
-function AllocationTable({ title, data, loading }: { title: string; data: Allocation[]; loading: boolean }) {
+function Action({ action, slot }: { action: PlanAction; slot: string | null }) {
+  return <span className="action" data-action={action}>{action}{slot && <span className="slot">{slot}</span>}</span>;
+}
+
+function LedgerRow({ label, a, b, suffix = "", loading }: { label: string; a: number | null; b: number | null; suffix?: string; loading: boolean }) {
+  const show = (v: number | null) => (v === null ? "-" : `${v}${suffix}`);
   return (
-    <div className="table-wrap">
-      <table className="data-table">
-        <caption>{title}</caption>
-        <thead><tr><th scope="col">Patient</th><th scope="col">Bed</th><th scope="col">Vent.</th><th scope="col">Nurse</th><th scope="col">Status</th></tr></thead>
-        <tbody>
-          {loading ? (
-            <tr><td colSpan={5}><SkeletonRows rows={4} /></td></tr>
-          ) : data.length ? data.map((x, i) => (
-            <tr key={`${x.patient}-${i}`}><td>{x.patient}</td><td className="num">{x.bed}</td><td className="num">{x.ventilator}</td><td className="num">{x.nurse}</td><td>{x.status}</td></tr>
-          )) : (
-            <tr><td colSpan={5}>No allocations. Add patients or raise capacity.</td></tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+    <tr>
+      <th scope="row">{label}</th>
+      <td className="num">{loading ? <Skeleton width={36} /> : show(a)}</td>
+      <td className="num">{loading ? <Skeleton width={36} /> : show(b)}</td>
+    </tr>
   );
-}
-
-function MetricRow({ label, a, b, suffix = "" }: { label: string; a: number | null; b: number | null; suffix?: string }) {
-  const show = (v: number | null) => (v === null ? "Not measured" : `${v}${suffix}`);
-  return <tr><td>{label}</td><td className="num">{show(a)}</td><td className="num">{show(b)}</td></tr>;
 }

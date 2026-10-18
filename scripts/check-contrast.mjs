@@ -21,7 +21,7 @@ const PAIRS = [
   ["muted", "paper", 4.5], ["muted", "surface", 4.5], ["accent", "paper", 4.5], ["accent", "surface", 4.5],
   ["accent-ink", "accent", 4.5], ["accent-ink", "danger", 4.5], ["danger", "paper", 4.5], ["danger", "surface", 4.5],
   ["ink", "danger-wash", 4.5], ["ink", "accent-wash", 4.5], ["accent", "accent-wash", 4.5], ["warn", "surface", 4.5],
-  ["line-strong", "surface", 3], ["line-strong", "paper", 3], ["accent", "skeleton", 3],
+  ["warn", "paper", 4.5], ["line-strong", "surface", 3], ["line-strong", "paper", 3], ["accent", "skeleton", 3], ["danger", "skeleton", 3], ["ink-2", "skeleton", 3], ["ink", "skeleton", 3],
 ];
 let failed = 0;
 for (const [fg, bg, min] of PAIRS) {
