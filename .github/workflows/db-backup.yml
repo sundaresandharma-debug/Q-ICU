@@ -1,0 +1,46 @@
+name: Database backup
+
+# Nightly encrypted logical backup of the Supabase database, kept for 30 days.
+# Required repository secrets:
+#   SUPABASE_DB_URL     Postgres connection string (Supabase > Project Settings > Database, session pooler)
+#   BACKUP_PASSPHRASE   Long random passphrase used to encrypt the dump. Store a copy somewhere safe.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    if: ${{ vars.ENABLE_DB_BACKUP == 'true' }}
+    steps:
+      - name: Install Postgres client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16 || sudo apt-get install -y -qq postgresql-client
+      - name: Dump and encrypt
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y%m%dT%H%M%SZ)
+          pg_dump "$SUPABASE_DB_URL" --format=custom --no-owner --no-privileges \
+            --schema=public --schema=auth --file=backup.dump
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+            --symmetric --cipher-algo AES256 --output "q-icu-$stamp.dump.gpg" backup.dump
+          rm backup.dump
+          echo "STAMP=$stamp" >> "$GITHUB_ENV"
+      - name: Apply retention rules
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select public.purge_expired_data();"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: q-icu-db-${{ env.STAMP }}
+          path: q-icu-*.dump.gpg
+          retention-days: 30
+          if-no-files-found: error

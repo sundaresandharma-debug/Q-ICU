@@ -5,6 +5,8 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
+RUN useradd --create-home --uid 10001 app
+USER app
 ENV PORT=8000
-# Set ALLOWED_ORIGINS to your frontend URL, e.g. https://q-icu.vercel.app
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]
+# Required in production: API_KEY (shared with the Next.js server as BACKEND_API_KEY).
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers"]

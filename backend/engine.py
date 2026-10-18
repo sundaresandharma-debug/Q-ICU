@@ -507,8 +507,8 @@ def optimize_icu(
     return {
         "bottleneck": bottleneck,
         "bottleneckReason": (
-            f"{demand[bottleneck]} predicted demand vs {capacity} available "
-            f"({pressures[bottleneck]:.2f}× capacity)."
+            f"{demand[bottleneck]} patients are predicted to need {bottleneck.lower()}, "
+            f"with {capacity} available ({pressures[bottleneck]:.2f} times capacity)."
         ),
         "pressures": pressures,
         "demand": demand,

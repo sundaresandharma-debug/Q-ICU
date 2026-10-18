@@ -1,4 +1,4 @@
-# Q-ICU — Predictive Bottleneck-Aware Quantum Optimization
+# Q-ICU: Predictive Bottleneck-Aware Quantum Optimization
 
 Q-ICU is a hackathon prototype for dynamic ICU resource allocation. It combines a lightweight ML prediction layer with bottleneck-aware problem reduction and a QUBO/QAOA workflow using Qiskit Aer.
 
@@ -6,11 +6,14 @@ This is a synthetic hackathon prototype and is **not** a clinical decision-suppo
 
 ## Features
 
-- Built-in 10-patient **demo scenario** (loaded on start, restored with *Reset demo*).
-- Import patient records from **CSV or JSON**, add patients manually, remove records.
-- Configure ICU beds, ventilators, nurses and QAOA shots from the UI.
+- Working demo at `/demo` with a built-in 10-patient scenario. No account needed.
+- Accounts (Supabase): sign up, sign in, sign out, password reset, onboarding, saved scenarios, data export and account deletion.
+- Import patient records from CSV or JSON, add patients by hand, remove records.
+- Configure ICU beds, ventilators, nurses and QAOA shots.
 - ML ventilator risk and derived priority from the backend are shown after a run. They are kept separate from user-entered values, so later timesteps recompute them.
-- When the backend is unreachable, the dashboard shows a **browser preview** clearly labelled as an estimate. It shows no runtimes and is never presented as a QAOA result.
+- When the backend is unreachable, the tool shows a browser estimate, clearly labelled. It shows no runtimes and is never presented as a QAOA result.
+
+Launch requirements (legal pages, consent, RLS, rate limiting, backups and more) are mapped to code in [`docs/LAUNCH_CHECKLIST.md`](docs/LAUNCH_CHECKLIST.md).
 
 ## Accepted patient columns
 
@@ -25,6 +28,8 @@ Optional:
 ```text
 current_state (defaults to Waiting), ventilator_need, priority
 ```
+
+`patient_id` must be a short code (letters, digits, `-`, `_`, up to 32 characters), so names and emails are rejected. `current_state` is `Waiting`, `Stable`, or resources joined with `+` (for example `Bed + Nurse`). Other columns in a file are ignored. Use synthetic data only.
 
 Aliases: `id`, `hr`, `rr`, `bp`, `oxygen_saturation`, `state`, `current`. A missing or non-numeric required value is reported as an import error rather than silently defaulted.
 
@@ -78,22 +83,36 @@ pip install -r requirements.txt
 python -m uvicorn backend.main:app --reload --port 8000
 ```
 
-### Tests
-
-```powershell
-pip install -r requirements-dev.txt
-python -m pytest tests -q
-```
-
 ### Frontend
 
 ```powershell
 npm install
+copy .env.example .env.local   # then fill in the values you have
 npm run dev
 ```
 
-Open `http://localhost:3000`. The frontend calls `http://localhost:8000` by default. Copy `.env.example` to `.env.local` to change it.
+Open `http://localhost:3000`. The browser calls `/api/optimize` on the Next.js server, which forwards to `BACKEND_URL` (default `http://localhost:8000`). The demo works without Supabase. Accounts need `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`, and the migration in `supabase/migrations/0001_init.sql`.
+
+### Checks
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest tests -q        # optimizer, API key, rate limit, input rules
+npm run check                    # design rules, colour contrast, TypeScript
+npm run build
+```
+
+CI (`.github/workflows/ci.yml`) also runs the database migration and the row level security tests in `supabase/tests/rls.sql` against Postgres 16.
 
 ## Deploying
 
-Vercel only hosts the Next.js frontend. Deploy the backend separately with the `Dockerfile` (see `api/README.md`), set `ALLOWED_ORIGINS` on the backend, and set `NEXT_PUBLIC_API_URL` in Vercel.
+1. Supabase: create a project, run the migration, and follow the dashboard settings in `docs/LAUNCH_CHECKLIST.md`.
+2. Backend: deploy the `Dockerfile` (see `api/README.md`) with `API_KEY` set.
+3. Vercel: deploy this repo and set the variables from `.env.example`. Keep `SUPABASE_SERVICE_ROLE_KEY`, `BACKEND_API_KEY` and `RATE_LIMIT_SALT` server-only (no `NEXT_PUBLIC_` prefix).
+4. Backups: add the `SUPABASE_DB_URL` and `BACKUP_PASSPHRASE` secrets and set the `ENABLE_DB_BACKUP` variable to `true`.
+
+## Project docs
+
+- [`docs/LAUNCH_CHECKLIST.md`](docs/LAUNCH_CHECKLIST.md): where each launch requirement is handled.
+- [`docs/THIRD_PARTY_AUDIT.md`](docs/THIRD_PARTY_AUDIT.md): dependencies, services, fonts and image licences.
+- [`docs/DESIGN_RULES.md`](docs/DESIGN_RULES.md): visual rules for the frontend redesign.
